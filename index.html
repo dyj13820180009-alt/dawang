@@ -246,6 +246,14 @@ textarea.text{min-height:96px;font-family:ui-monospace,Menlo,Consolas,monospace;
 .bit{position:fixed;left:50%;top:30%;width:11px;height:11px;z-index:39;pointer-events:none;border:1.5px solid var(--ink);animation:fly .95s ease-out forwards}
 @keyframes fly{to{transform:translate(var(--dx),var(--dy)) rotate(var(--rot));opacity:0}}
 .confirm{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.rec{display:flex;gap:10px;align-items:flex-start;border:2px solid var(--ink);border-radius:12px;background:#EEF4FF;padding:10px 12px;font-weight:700;cursor:pointer}
+.rec input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--grape);flex:none}
+.rec small{display:block;font-weight:500;color:var(--mute);font-size:13px}
+.rec[hidden]{display:none}
+.tag{display:inline-block;margin-left:6px;padding:0 7px;border-radius:999px;border:1.5px solid var(--ink);background:#EEF4FF;font-size:11.5px;font-weight:700;vertical-align:1px}
+.subrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 0;border-bottom:1.5px dashed var(--line)}
+.subrow:last-child{border-bottom:0}
+.subrow b{display:block}.subrow small{display:block;color:var(--mute);font-size:13px}
 
 /* ---------- 窄屏 ---------- */
 @media (max-width:860px){
@@ -314,9 +322,11 @@ function labelDay(s){var t=today();if(s===t)return "今天";if(s===shift(t,-1))r
 var WD=["日","一","二","三","四","五","六"];
 
 /* ================= 计算 ================= */
-function dailyCents(s){return Math.round(state.settings.target*100/dim(s));}
+/* 订阅按月算：先从当月目标里扣掉，剩下的再平摊到每天 */
+function subMonth(s){var ym=s.slice(0,7),t=0;state.entries.forEach(function(e){if(e.c==="sub"&&e.d.slice(0,7)===ym)t+=cents(e.a);});return t;}
+function dailyCents(s){return Math.round((state.settings.target*100-subMonth(s))/dim(s));}
 function entriesOn(s){return state.entries.filter(function(e){return e.d===s;}).sort(function(a,b){return b.t-a.t;});}
-function spentOn(s){var t=0;state.entries.forEach(function(e){if(e.d===s)t+=cents(e.a);});return t;}
+function spentOn(s){var t=0;state.entries.forEach(function(e){if(e.d===s&&e.c!=="sub")t+=cents(e.a);});return t;}
 function effStart(){var s=state.settings.start||today();state.entries.forEach(function(e){if(e.d<s)s=e.d;});return s;}
 function counted(s){return s>=effStart()&&s<=today();}
 function netOn(s){return dailyCents(s)-spentOn(s);}
@@ -327,14 +337,38 @@ function rangeDays(r){
   return lastDays(+r);
 }
 function summarize(days){
-  var spent=0,target=0,n=0,by={};
+  var spent=0,target=0,net=0,n=0,by={};
   days.forEach(function(d){
-    if(counted(d)){target+=dailyCents(d);n++;}
+    if(counted(d)){target+=Math.round(state.settings.target*100/dim(d));net+=netOn(d);n++;}
   });
   state.entries.forEach(function(e){
     if(days.indexOf(e.d)>-1){spent+=cents(e.a);by[e.c]=(by[e.c]||0)+cents(e.a);}
   });
-  return {spent:spent,target:target,net:target-spent,n:n,by:by};
+  return {spent:spent,target:target,net:net,n:n,by:by};
+}
+function subs(){if(!Array.isArray(state.settings.subs))state.settings.subs=[];return state.settings.subs;}
+function cleanSubs(a){return (Array.isArray(a)?a:[]).filter(function(q){return q&&q.id&&+q.a>0&&+q.day>=1&&+q.day<=31&&/^\d{4}-\d{2}$/.test(q.last||"");})
+  .map(function(q){return {id:String(q.id),a:+q.a,n:String(q.n||"").slice(0,40),day:+q.day,last:q.last};});}
+function nextYm(ym){var y=+ym.slice(0,4),m=+ym.slice(5,7)+1;if(m>12){m=1;y++;}return y+"-"+pad(m);}
+function chargeDay(ym,day){var n=new Date(+ym.slice(0,4),+ym.slice(5,7),0).getDate();return ym+"-"+pad(Math.min(day,n));}
+/* 到了扣费日就自动记上这个月的订阅；只补最近 3 个月，避免覆盖没加载的旧月份 */
+var ready=false;
+function autoSubs(){
+  if(!ready||!state.settings)return 0;
+  var t=today(),win=neededMonths().map(function(k){return k.slice(2);}),added=0,changed=false;
+  subs().forEach(function(q){
+    var ym=nextYm(q.last);
+    while(ym<=t.slice(0,7)){
+      var d=chargeDay(ym,q.day);
+      if(d>t)break;
+      if(win.indexOf(ym)>-1&&!state.entries.some(function(e){return e.id===q.id+"-"+ym;})){
+        state.entries.push({id:q.id+"-"+ym,d:d,c:"sub",a:q.a,n:q.n,t:Date.now(),r:q.id});markDirty(monthKey(d));added++;
+      }
+      q.last=ym;changed=true;ym=nextYm(ym);
+    }
+  });
+  if(changed)markDirty("settings");
+  return added;
 }
 function streak(){var t=today(),n=0,d=t;while(counted(d)&&netOn(d)>=0){n++;d=shift(d,-1);}return n;}
 
@@ -370,7 +404,7 @@ var db=null,col=null,busy={};
 function setCloud(s){ui.cloud=s;var el=$(".cloud");if(el){el.dataset.s=s;el.lastChild.textContent=cloudText();}}
 function cloudText(){return {ok:"已保存到你的账号，换设备也能看",saving:"正在保存…",err:"暂时连不上，先存在这台设备上，稍后会再试",local:"账目存在这台设备上"}[ui.cloud];}
 function bodyFor(key){
-  if(key==="settings")return state.settings?{income:state.settings.income,target:state.settings.target,start:state.settings.start}:{};
+  if(key==="settings")return state.settings?{income:state.settings.income,target:state.settings.target,start:state.settings.start,subs:subs()}:{};
   var ym=key.slice(2);
   return {entries:state.entries.filter(function(e){return e.d.slice(0,7)===ym;})};
 }
@@ -389,11 +423,11 @@ function pump(key){
 }
 function neededMonths(){var t=today(),a=[],d=toDate(t);for(var i=0;i<3;i++){a.push("m-"+d.getFullYear()+"-"+pad(d.getMonth()+1));d=new Date(d.getFullYear(),d.getMonth()-1,1);}return a;}
 function initCloud(){
-  if(!window.claude||typeof window.claude.use!=="function")return;
+  if(!window.claude||typeof window.claude.use!=="function"){ready=true;if(autoSubs())render();return;}
   Promise.all([window.claude.use("db"),window.claude.use("user")]).then(function(r){
-    if(!r[0]||!r[1])return null;
+    if(!r[0]||!r[1]){ready=true;if(autoSubs())render();return null;}
     return r[1].id().then(function(id){
-      if(!id)return null;
+      if(!id){ready=true;if(autoSubs())render();return null;}
       db=r[0];col=db.collection("data/users/"+id);
       var keys=["settings"].concat(neededMonths());
       var timeout=new Promise(function(_,rej){setTimeout(function(){rej(new Error("timeout"));},10000);});
@@ -403,7 +437,7 @@ function initCloud(){
           if(state.dirty.indexOf(key)>-1)return;               // 本机有没传上去的改动，以本机为准
           var data=snap.exists?snap.data():null;
           if(key==="settings"){
-            if(data&&typeof data.target==="number")state.settings={income:+data.income||0,target:+data.target,start:data.start||today()};
+            if(data&&typeof data.target==="number")state.settings={income:+data.income||0,target:+data.target,start:data.start||today(),subs:cleanSubs(data.subs)};
             else if(state.settings)state.dirty.push(key);
           }else{
             var ym=key.slice(2);
@@ -415,6 +449,7 @@ function initCloud(){
         });
         saveLocal();setCloud("ok");
         state.dirty.slice().forEach(pump);
+        ready=true;autoSubs();
         if(!ui.sheet)render();
       });
     });
@@ -462,7 +497,7 @@ function bindWelcome(){
     ev.preventDefault();
     var inc=parseMoney(a.value),tar=parseMoney(b.value);
     if(!(tar>0)){$("#w-err").textContent="目标花费要填一个大于 0 的数。";b.focus();return;}
-    state.settings={income:inc>0?inc:0,target:tar,start:today()};
+    state.settings={income:inc>0?inc:0,target:tar,start:today(),subs:[]};
     markDirty("settings");ui.view="home";render();
     pop("praise","happy","开张大吉！","每天能花 "+yuan(dailyCents(today()))+"，记一笔试试",true);
   });
@@ -473,7 +508,7 @@ function rowHTML(e,showDay){
   var c=CAT[e.c]||CAT.other;
   return '<button class="row" data-edit="'+esc(e.id)+'" title="点一下修改或删除">'
     +'<span class="dot" style="--c:'+c.c+'">'+c.e+'</span>'
-    +'<span><b>'+c.n+'</b><small>'+(showDay?labelDay(e.d)+(e.n?"，":""):"")+esc(e.n||(showDay?"":"没写备注"))+'</small></span>'
+    +'<span><b>'+c.n+(e.c==="sub"?'<span class="tag">'+(e.r?"每月自动":"按月平摊")+'</span>':'')+'</b><small>'+(showDay?labelDay(e.d)+(e.n?"，":""):"")+esc(e.n||(showDay?"":"没写备注"))+'</small></span>'
     +'<span class="amt num">−'+yuan(cents(e.a))+'</span></button>';
 }
 
@@ -505,7 +540,7 @@ function viewHome(){
         +'<div class="left-label">'+(left>=0?"今天还能花":"今天已经超支")+'</div>'
         +'<div class="left-num num '+(left>=0?"":"bad")+'">'+yuan(left)+'</div></div></div>'
         +'<div class="meter'+(left<0?" over":"")+'" role="img" aria-label="今天已花 '+pct+'%"><span style="width:'+pct+'%"></span></div>'
-        +'<div class="meter-cap"><span>已花 '+yuan(spent)+'</span><span>每天目标 '+yuan(daily)+'（'+yuan(monthTarget)+' ÷ '+dim(t)+' 天）</span></div>'
+        +'<div class="meter-cap"><span>已花 '+yuan(spent)+'</span><span>每天目标 '+yuan(daily)+'（'+(subMonth(t)?'('+yuan(monthTarget)+' − 订阅 '+yuan(subMonth(t))+')':yuan(monthTarget))+' ÷ '+dim(t)+' 天）</span></div>'
       +'</section>'
       +rep.replace('class="report','class="o3 report')
       +'<div class="tiles o4">'
@@ -529,7 +564,7 @@ function viewDetail(){
   var days=rangeDays(ui.range),s=summarize(days);
   var order=CATS.slice().sort(function(a,b){return (s.by[b.k]||0)-(s.by[a.k]||0);});
   var max=Math.max.apply(null,order.map(function(c){return s.by[c.k]||0;}).concat([1]));
-  var listDays=days.slice().reverse().filter(function(d){return spentOn(d)>0;});
+  var listDays=days.slice().reverse().filter(function(d){return entriesOn(d).length>0;});
   return '<div class="head"><h1>细则</h1><div class="seg" role="group" aria-label="时间范围">'
       +R.map(function(r){return '<button data-range="'+r[0]+'" aria-pressed="'+(ui.range===r[0])+'">'+r[1]+'</button>';}).join("")+'</div></div>'
     +'<div class="grid2"><section class="card"><h2>分类汇总</h2>'
@@ -537,6 +572,7 @@ function viewDetail(){
       +'<div><small>这段时间的目标</small><span class="num">'+yuan(s.target)+'</span></div>'
       +'<div><small>相比目标</small><span class="num '+(s.net>=0?"good":"bad")+'">'+signed(s.net)+'</span></div></div>'
       +(s.spent?'<div class="stackbar" role="img" aria-label="各分类占比">'+order.filter(function(c){return s.by[c.k];}).map(function(c){return '<span style="width:'+(s.by[c.k]/s.spent*100)+'%;background:'+c.c+'" title="'+c.n+' '+yuan(s.by[c.k])+'"></span>';}).join("")+'</div>':'')
+      +(s.by.sub?'<p class="mute" style="margin:0 0 10px;font-size:13.5px">📺 订阅一月记一次，按整月平摊到每天算盈余，不会让扣费那天单独超支。</p>':'')
       +order.map(function(c){var v=s.by[c.k]||0;
         return '<div class="catrow"><span class="name">'+c.e+' '+c.n+'</span><span class="track"><span style="--c:'+c.c+';width:'+(v/max*100)+'%;'+(v?"":"border:0")+'"></span></span>'
           +'<span class="val num">'+yuan(v)+'<small>'+(s.spent?Math.round(v/s.spent*100):0)+'%</small></span></div>';}).join("")
@@ -590,6 +626,12 @@ function viewPrefs(){
     +'<div class="err" id="p-err" role="alert"></div>'
     +'<button class="btn" type="submit">保存设置</button>'
     +'<p class="mute" style="margin:14px 0 0;font-size:14px">改了目标以后，以前每天的盈余也会按新目标重新算。账本从 '+labelDay(effStart())+' 开始计。</p></form>'
+    +'<section class="card"><h2>📺 每月订阅</h2>'
+      +(subs().length?'<p class="mute" style="margin:0 0 6px;font-size:14px">每到扣费日自动记一笔，先从当月目标里扣掉，再平摊到每天。</p><div>'+subs().map(function(q){
+          return '<div class="subrow"><span class="dot" style="font-size:22px">📺</span><span><b>'+esc(q.n||"订阅")+' · '+yuan(cents(q.a))+' / 月</b><small>每月 '+q.day+' 号自动记</small></span>'
+            +'<button class="btn plain" data-unsub="'+esc(q.id)+'">停掉</button></div>';}).join("")+'</div>'
+        :'<p class="mute" style="margin:0">还没有。首页点 📺 订阅记一笔，勾上“每月自动记”就会出现在这里。</p>')
+    +'</section>'
     +'<section class="card"><h2>账目数据</h2><p style="margin-top:0">一共记了 '+state.entries.length+' 笔。</p>'
       +'<div class="confirm"><button class="btn plain" data-act="copy">复制全部账目</button>'
       +(ui.confirmClear
@@ -614,6 +656,7 @@ function openSheet(o){
     +'<div class="pills" id="s-dates">'+quick.map(function(d){return '<button type="button" class="pill" data-date="'+d+'" aria-pressed="'+(s.date===d)+'">'+labelDay(d)+'</button>';}).join("")
       +'<input class="pill" type="date" id="s-date" aria-label="其他日期" max="'+t+'" value="'+s.date+'"></div>'
     +'<input class="text" id="s-note" maxlength="40" placeholder="备注，可以不写" value="'+esc(s.note)+'" aria-label="备注">'
+    +'<label class="rec" id="s-rec"'+(s.cat==="sub"&&!s.id?'':' hidden')+'><input type="checkbox" id="s-rec-on" checked><span>每月自动记<small>以后每月同一天自动记一笔，金额按整月平摊，不让那天超支</small></span></label>'
     +'<div class="err" id="s-err" role="alert"></div>'
     +'<footer>'+(s.id?'<button type="button" class="btn danger" data-del>删除</button>':'')+'<button class="btn big" type="submit">'+(s.id?"保存":"记上")+'</button></footer>'
     +'</form></div>';
@@ -625,15 +668,22 @@ function submitSheet(){
   if(!(a>0)){$("#s-err").textContent="金额要填一个大于 0 的数。";$("#s-amt").focus();return;}
   if(a>9999999){$("#s-err").textContent="这个数太大了，检查一下有没有多按。";return;}
   var date=s.date,note=$("#s-note").value.trim(),t=today();
+  var rec=!s.id&&s.cat==="sub"&&$("#s-rec-on")&&$("#s-rec-on").checked;
   var before=counted(t)?netOn(t):dailyCents(t);
   if(s.id){
     var e=state.entries.filter(function(x){return x.id===s.id;})[0];
     if(e){var old=monthKey(e.d);e.c=s.cat;e.a=a;e.d=date;e.n=note;if(old!==monthKey(date))markDirty(old);}
   }else{
-    state.entries.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),d:date,c:s.cat,a:a,n:note,t:Date.now()});
+    var nid=Date.now().toString(36)+Math.random().toString(36).slice(2,7),ym=date.slice(0,7);
+    if(rec){
+      subs().push({id:nid,a:a,n:note,day:+date.slice(8,10),last:ym});
+      state.entries.push({id:nid+"-"+ym,d:date,c:s.cat,a:a,n:note,t:Date.now(),r:nid});
+      markDirty("settings");autoSubs();
+    }else state.entries.push({id:nid,d:date,c:s.cat,a:a,n:note,t:Date.now()});
   }
   markDirty(monthKey(date));
   var wasEdit=!!s.id;closeSheet();render();
+  if(rec){pop("praise","happy","订阅记上了","每月 "+(+date.slice(8,10))+" 号自动记，今天还能花 "+yuan(netOn(t)),true);return;}
   if(date!==t){var n=netOn(date);pop(n>=0?"praise":"over",n>=0?"happy":"angry",wasEdit?"改好了":"补上了",labelDay(date)+(n>=0?"盈余 ":"超支 ")+yuan(n),false);return;}
   var after=netOn(t),daily=dailyCents(t);
   if(after<0&&before>=0)pop("over","angry","超支了！","今天超了 "+yuan(-after)+"，大王震怒",false);
@@ -673,17 +723,18 @@ function go(v){ui.view=v;ui.confirmClear=false;try{if(location.hash!=="#"+v)loca
 function fromHash(){var h=(location.hash||"").slice(1);if(["home","detail","calendar","prefs"].indexOf(h)>-1&&h!==ui.view){ui.view=h;render();}}
 
 document.addEventListener("click",function(ev){
-  var t=ev.target.closest("[data-go],[data-add],[data-edit],[data-range],[data-day],[data-act],[data-close],[data-cat],[data-plus],[data-date],[data-del]");
+  var t=ev.target.closest("[data-unsub],[data-go],[data-add],[data-edit],[data-range],[data-day],[data-act],[data-close],[data-cat],[data-plus],[data-date],[data-del]");
   if(ev.target.id==="scrim"){closeSheet();return;}
   if(!t)return;
   var d=t.dataset;
-  if(d.go)go(d.go);
+  if(d.unsub){state.settings.subs=subs().filter(function(q){return q.id!==d.unsub;});markDirty("settings");render();pop("warn","idle","停掉了","以后不再自动记，以前记的还在",false);}
+  else if(d.go)go(d.go);
   else if(d.add)openSheet({cat:d.add,date:d.date});
   else if(d.edit){var e=state.entries.filter(function(x){return x.id===d.edit;})[0];if(e)openSheet({id:e.id,cat:e.c,date:e.d,amount:String(e.a),note:e.n});}
   else if(d.range){ui.range=d.range;render();}
   else if(d.day){ui.calDay=d.day;render();}
   else if("close" in d)closeSheet();
-  else if(d.cat&&ui.sheet){ui.sheet.cat=d.cat;[].forEach.call(document.querySelectorAll("#s-cats .pill"),function(p){p.setAttribute("aria-pressed",p.dataset.cat===d.cat);});$("#s-amt").focus();}
+  else if(d.cat&&ui.sheet){ui.sheet.cat=d.cat;$("#s-rec").hidden=!(d.cat==="sub"&&!ui.sheet.id);[].forEach.call(document.querySelectorAll("#s-cats .pill"),function(p){p.setAttribute("aria-pressed",p.dataset.cat===d.cat);});$("#s-amt").focus();}
   else if(d.plus&&ui.sheet){var inp=$("#s-amt"),cur=parseMoney(inp.value);inp.value=String(Math.round(((cur>0?cur:0)+ +d.plus)*100)/100);inp.focus();}
   else if(d.date&&ui.sheet){ui.sheet.date=d.date;$("#s-date").value=d.date;syncDates();}
   else if("del" in d&&ui.sheet){
@@ -703,8 +754,8 @@ document.addEventListener("click",function(ev){
     if(!raw){errEl.textContent="先把账目内容粘贴进来。";return;}
     try{data=JSON.parse(raw);}catch(e){errEl.textContent="这段内容读不出来，确认是从“复制全部账目”完整复制的。";return;}
     if(!data||!data.settings||!(+data.settings.target>0)||!Array.isArray(data.entries)){errEl.textContent="这段内容里没有账本数据，确认是从“复制全部账目”完整复制的。";return;}
-    var okList=data.entries.filter(function(q){return q&&q.id&&/^\d{4}-\d{2}-\d{2}$/.test(q.d)&&CAT[q.c]&&+q.a>0;}).map(function(q){return {id:String(q.id),d:q.d,c:q.c,a:+q.a,n:String(q.n||"").slice(0,40),t:+q.t||0};});
-    state.settings={income:+data.settings.income||0,target:+data.settings.target,start:/^\d{4}-\d{2}-\d{2}$/.test(data.settings.start||"")?data.settings.start:today()};
+    var okList=data.entries.filter(function(q){return q&&q.id&&/^\d{4}-\d{2}-\d{2}$/.test(q.d)&&CAT[q.c]&&+q.a>0;}).map(function(q){var o={id:String(q.id),d:q.d,c:q.c,a:+q.a,n:String(q.n||"").slice(0,40),t:+q.t||0};if(q.r)o.r=String(q.r);return o;});
+    state.settings={income:+data.settings.income||0,target:+data.settings.target,start:/^\d{4}-\d{2}-\d{2}$/.test(data.settings.start||"")?data.settings.start:today(),subs:cleanSubs(data.settings.subs)};
     state.entries=okList;saveLocal();render();
     pop("praise","happy","搬好了","一共 "+okList.length+" 笔账",true);
   }
@@ -736,7 +787,7 @@ window.addEventListener("hashchange",fromHash);
 
 /* 过了零点自动换到新的一天 */
 var seenDay=today();
-setInterval(function(){var t=today();if(t!==seenDay){seenDay=t;if(!ui.sheet)render();}},60000);
+setInterval(function(){var t=today();if(t!==seenDay){seenDay=t;autoSubs();if(!ui.sheet)render();}},60000);
 
 /* ================= 启动 ================= */
 loadLocal();
