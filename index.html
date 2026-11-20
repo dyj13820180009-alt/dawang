@@ -297,8 +297,11 @@ var CATS=[
   {k:"drink",n:"饮料",e:"🧋",c:"#C9A27A"},
   {k:"sub",n:"订阅",e:"📺",c:"#8FB8FF"},
   {k:"fun",n:"玩耍",e:"🎮",c:"#B79CFF"},
-  {k:"other",n:"其他",e:"📦",c:"#9FE0C0"}
+  {k:"other",n:"其他",e:"📦",c:"#9FE0C0"},
+  {k:"big",n:"大支出",e:"💸",c:"#FF9BB5"}
 ];
+/* 这些分类不算进某一天，而是从当月预算里整笔扣掉，再平摊到每天 */
+function monthly(c){return c==="sub"||c==="big";}
 var CAT={};CATS.forEach(function(c){CAT[c.k]=c;});
 var LS="dawang-ledger-v1";
 var state={settings:null,entries:[],dirty:[]};
@@ -323,10 +326,10 @@ var WD=["日","一","二","三","四","五","六"];
 
 /* ================= 计算 ================= */
 /* 订阅按月算：先从当月目标里扣掉，剩下的再平摊到每天 */
-function subMonth(s){var ym=s.slice(0,7),t=0;state.entries.forEach(function(e){if(e.c==="sub"&&e.d.slice(0,7)===ym)t+=cents(e.a);});return t;}
+function subMonth(s){var ym=s.slice(0,7),t=0;state.entries.forEach(function(e){if(monthly(e.c)&&e.d.slice(0,7)===ym)t+=cents(e.a);});return t;}
 function dailyCents(s){return Math.round((state.settings.target*100-subMonth(s))/dim(s));}
 function entriesOn(s){return state.entries.filter(function(e){return e.d===s;}).sort(function(a,b){return b.t-a.t;});}
-function spentOn(s){var t=0;state.entries.forEach(function(e){if(e.d===s&&e.c!=="sub")t+=cents(e.a);});return t;}
+function spentOn(s){var t=0;state.entries.forEach(function(e){if(e.d===s&&!monthly(e.c))t+=cents(e.a);});return t;}
 function effStart(){var s=state.settings.start||today();state.entries.forEach(function(e){if(e.d<s)s=e.d;});return s;}
 function counted(s){return s>=effStart()&&s<=today();}
 function netOn(s){return dailyCents(s)-spentOn(s);}
@@ -508,7 +511,7 @@ function rowHTML(e,showDay){
   var c=CAT[e.c]||CAT.other;
   return '<button class="row" data-edit="'+esc(e.id)+'" title="点一下修改或删除">'
     +'<span class="dot" style="--c:'+c.c+'">'+c.e+'</span>'
-    +'<span><b>'+c.n+(e.c==="sub"?'<span class="tag">'+(e.r?"每月自动":"按月平摊")+'</span>':'')+'</b><small>'+(showDay?labelDay(e.d)+(e.n?"，":""):"")+esc(e.n||(showDay?"":"没写备注"))+'</small></span>'
+    +'<span><b>'+c.n+(monthly(e.c)?'<span class="tag">'+(e.r?"每月自动":"从月预算扣")+'</span>':'')+'</b><small>'+(showDay?labelDay(e.d)+(e.n?"，":""):"")+esc(e.n||(showDay?"":"没写备注"))+'</small></span>'
     +'<span class="amt num">−'+yuan(cents(e.a))+'</span></button>';
 }
 
@@ -540,7 +543,7 @@ function viewHome(){
         +'<div class="left-label">'+(left>=0?"今天还能花":"今天已经超支")+'</div>'
         +'<div class="left-num num '+(left>=0?"":"bad")+'">'+yuan(left)+'</div></div></div>'
         +'<div class="meter'+(left<0?" over":"")+'" role="img" aria-label="今天已花 '+pct+'%"><span style="width:'+pct+'%"></span></div>'
-        +'<div class="meter-cap"><span>已花 '+yuan(spent)+'</span><span>每天目标 '+yuan(daily)+'（'+(subMonth(t)?'('+yuan(monthTarget)+' − 订阅 '+yuan(subMonth(t))+')':yuan(monthTarget))+' ÷ '+dim(t)+' 天）</span></div>'
+        +'<div class="meter-cap"><span>已花 '+yuan(spent)+'</span><span>每天目标 '+yuan(daily)+'（'+(subMonth(t)?'('+yuan(monthTarget)+' − 订阅和大支出 '+yuan(subMonth(t))+')':yuan(monthTarget))+' ÷ '+dim(t)+' 天）</span></div>'
       +'</section>'
       +rep.replace('class="report','class="o3 report')
       +'<div class="tiles o4">'
@@ -572,7 +575,7 @@ function viewDetail(){
       +'<div><small>这段时间的目标</small><span class="num">'+yuan(s.target)+'</span></div>'
       +'<div><small>相比目标</small><span class="num '+(s.net>=0?"good":"bad")+'">'+signed(s.net)+'</span></div></div>'
       +(s.spent?'<div class="stackbar" role="img" aria-label="各分类占比">'+order.filter(function(c){return s.by[c.k];}).map(function(c){return '<span style="width:'+(s.by[c.k]/s.spent*100)+'%;background:'+c.c+'" title="'+c.n+' '+yuan(s.by[c.k])+'"></span>';}).join("")+'</div>':'')
-      +(s.by.sub?'<p class="mute" style="margin:0 0 10px;font-size:13.5px">📺 订阅一月记一次，按整月平摊到每天算盈余，不会让扣费那天单独超支。</p>':'')
+      +(s.by.sub||s.by.big?'<p class="mute" style="margin:0 0 10px;font-size:13.5px">📺 订阅和 💸 大支出直接从当月预算里扣，再平摊到每天算盈余，不会让某一天单独超支。</p>':'')
       +order.map(function(c){var v=s.by[c.k]||0;
         return '<div class="catrow"><span class="name">'+c.e+' '+c.n+'</span><span class="track"><span style="--c:'+c.c+';width:'+(v/max*100)+'%;'+(v?"":"border:0")+'"></span></span>'
           +'<span class="val num">'+yuan(v)+'<small>'+(s.spent?Math.round(v/s.spent*100):0)+'%</small></span></div>';}).join("")
@@ -683,6 +686,7 @@ function submitSheet(){
   }
   markDirty(monthKey(date));
   var wasEdit=!!s.id;closeSheet();render();
+  if(s.cat==="big"&&!wasEdit){var nd=dailyCents(t);pop(nd>=0?"warn":"over",nd>=0?"wow":"angry","大支出记上了","从"+(+date.slice(5,7))+"月预算扣掉 "+yuan(cents(a))+"，以后每天能花 "+yuan(nd),false);return;}
   if(rec){pop("praise","happy","订阅记上了","每月 "+(+date.slice(8,10))+" 号自动记，今天还能花 "+yuan(netOn(t)),true);return;}
   if(date!==t){var n=netOn(date);pop(n>=0?"praise":"over",n>=0?"happy":"angry",wasEdit?"改好了":"补上了",labelDay(date)+(n>=0?"盈余 ":"超支 ")+yuan(n),false);return;}
   var after=netOn(t),daily=dailyCents(t);
