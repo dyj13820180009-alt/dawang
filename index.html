@@ -262,6 +262,11 @@ textarea.text{min-height:96px;font-family:ui-monospace,Menlo,Consolas,monospace;
 .chartbox .tip small{display:block;font-weight:500;color:#C9C1E8;font-size:12px}
 .cardhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
 .cardhead h2{margin:0}
+.log details{border-top:1.5px dashed var(--line);padding:10px 0}
+.log details:first-of-type{border-top:0;padding-top:0}
+.log summary{cursor:pointer;font-weight:700;list-style-position:inside}
+.log summary small{font-weight:500;color:var(--mute);margin-left:6px}
+.log ul{margin:8px 0 0;padding-left:22px;line-height:1.7}
 .rec{display:flex;gap:10px;align-items:flex-start;border:2px solid var(--ink);border-radius:12px;background:#EEF4FF;padding:10px 12px;font-weight:700;cursor:pointer}
 .rec input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--grape);flex:none}
 .rec small{display:block;font-weight:500;color:var(--mute);font-size:13px}
@@ -744,6 +749,12 @@ function drawChart(){
 }
 var rsz=null;window.addEventListener("resize",function(){clearTimeout(rsz);rsz=setTimeout(function(){if(ui.view==="assets"&&state.settings)drawChart();},150);});
 
+var LOG=[
+  ["v1.3","11月25日","资产页",["底栏新增「💰 资产」","资产变化曲线，可看近 30 天、近 90 天、全部，划过曲线看每天的资产","资产页显示总资产、能撑几个月、本月收支和最近的收入","每次校准都会留下记录，曲线不会因为校准从头画","首页的「总资产」点一下就跳到资产页"]],
+  ["v1.2","11月25日","总资产和记收入",["不再填每月收入，改成填「现在总资产」","首页新增「💰 记收入」，来一笔记一笔","收入可勾「每月固定」，每月同一天自动记","总资产对不上，在设置里直接改成实际的数就行","首页新增本月结余"]],
+  ["v1.1","11月20日","订阅和大支出",["📺 订阅可以每月自动记","新增 💸 大支出","订阅和大支出从当月预算里扣，不会让某一天单独超支"]],
+  ["v1.0","11月16日","开张",["填每月目标，算出每天能花多少","七个分类记账，超支了大王会生气","细则、日历、手机桌面、断网可用、搬账"]]
+];
 function viewPrefs(){
   var s=state.settings,ta=totalAssets();
   function recList(list,kind,emo,emptyText){
@@ -778,7 +789,10 @@ function viewPrefs(){
     +'<section class="card"><h2>从别的设备搬账</h2><p style="margin:0">在另一台设备的设置页点“复制全部账目”，把内容粘贴到下面。</p>'
       +'<textarea class="text" id="imp" aria-label="粘贴账目内容" placeholder="粘贴到这里"></textarea>'
       +'<button class="btn plain" data-act="import">用粘贴的内容替换现有账目</button>'
-      +'<div class="err" id="imp-err" role="alert"></div></section>';
+      +'<div class="err" id="imp-err" role="alert"></div></section>'
+    +'<section class="card log"><h2>📜 更新日志</h2>'
+      +LOG.map(function(v,i){return '<details'+(i?'':' open')+'><summary>'+v[0]+' '+esc(v[2])+'<small>'+v[1]+'</small></summary><ul>'+v[3].map(function(x){return '<li>'+esc(x)+'</li>';}).join("")+'</ul></details>';}).join("")
+    +'</section>';
 }
 
 /* ================= 记一笔 ================= */
