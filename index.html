@@ -251,6 +251,17 @@ textarea.text{min-height:96px;font-family:ui-monospace,Menlo,Consolas,monospace;
 .btn.income{width:100%;margin-top:14px;background:var(--good)}
 .row .amt.good{color:var(--good)}
 .note{font-size:13.5px;line-height:1.6;margin:10px 0 0;color:var(--mute)}
+.tile.link{cursor:pointer;text-decoration:none;color:inherit;display:block}
+.tile.link:hover{transform:translate(-1px,-1px)}
+.ahero{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.ahero .left-num{font-size:56px}
+.ahero .chg{font-weight:700;font-size:15px}
+.chartbox{position:relative;margin-top:6px;touch-action:pan-y}
+.chartbox svg{display:block;width:100%;overflow:visible}
+.chartbox .tip{position:absolute;top:0;pointer-events:none;background:var(--ink);color:#fff;border-radius:10px;padding:6px 10px;font-size:13px;font-weight:700;white-space:nowrap;transform:translateX(-50%);display:none}
+.chartbox .tip small{display:block;font-weight:500;color:#C9C1E8;font-size:12px}
+.cardhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.cardhead h2{margin:0}
 .rec{display:flex;gap:10px;align-items:flex-start;border:2px solid var(--ink);border-radius:12px;background:#EEF4FF;padding:10px 12px;font-weight:700;cursor:pointer}
 .rec input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--grape);flex:none}
 .rec small{display:block;font-weight:500;color:var(--mute);font-size:13px}
@@ -265,7 +276,8 @@ textarea.text{min-height:96px;font-family:ui-monospace,Menlo,Consolas,monospace;
   .app{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
   .nav{order:2;flex-direction:row;padding:8px calc(10px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));gap:4px;justify-content:space-around}
   .brand,.cloud{display:none}
-  .tab{flex-direction:column;gap:0;padding:6px 10px;font-size:12.5px;flex:1;align-items:center}
+  .tab{flex-direction:column;gap:0;padding:6px 4px;font-size:12.5px;flex:1;align-items:center;min-width:0}
+  .ahero .left-num{font-size:44px}
   .page{padding:18px 16px 28px;gap:16px}
   .grid2{grid-template-columns:minmax(0,1fr)}
   .homegrid{gap:16px}.homegrid .stack{display:contents}
@@ -314,7 +326,7 @@ var CAT={};CATS.forEach(function(c){CAT[c.k]=c;});
 CAT.income={k:"income",n:"收入",e:"💰",c:"#7CDB9A"};
 var LS="dawang-ledger-v1";
 var state={settings:null,entries:[],dirty:[]};
-var ui={view:"home",range:"30",calDay:null,sheet:null,confirmClear:false,cloud:"local"};
+var ui={view:"home",range:"30",arange:"30",calDay:null,sheet:null,confirmClear:false,cloud:"local"};
 
 function $(s,r){return (r||document).querySelector(s);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(m){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m];});}
@@ -398,6 +410,19 @@ function totalAssets(){
   state.entries.forEach(function(e){if((e.t||0)>A.t)t+=e.c==="income"?cents(e.a):-cents(e.a);});
   return t;
 }
+function hist(){if(!Array.isArray(state.settings.hist))state.settings.hist=[];return state.settings.hist;}
+function cleanHist(a){return (Array.isArray(a)?a:[]).map(cleanAssets).filter(Boolean);}
+/* 每天结束时的总资产：用那天之前最近的一次校准往下推；还没填过资产的日子是 null */
+function assetSeries(days){
+  var cals=hist().concat(state.settings.assets?[state.settings.assets]:[]).slice().sort(function(a,b){return a.t-b.t;});
+  return days.map(function(D){
+    var c=null;cals.forEach(function(x){if(ymd(new Date(x.t))<=D)c=x;});
+    if(!c)return {d:D,v:null};
+    var v=cents(c.a);state.entries.forEach(function(e){if((e.t||0)>c.t&&e.d<=D)v+=e.c==="income"?cents(e.a):-cents(e.a);});
+    return {d:D,v:v};
+  });
+}
+function firstCalDay(){var a=hist().concat(state.settings.assets?[state.settings.assets]:[]),m=null;a.forEach(function(x){var d=ymd(new Date(x.t));if(!m||d<m)m=d;});return m;}
 function monthIncome(ym){var t=0;state.entries.forEach(function(e){if(e.c==="income"&&e.d.slice(0,7)===ym)t+=cents(e.a);});return t;}
 function streak(){var t=today(),n=0,d=t;while(counted(d)&&netOn(d)>=0){n++;d=shift(d,-1);}return n;}
 
@@ -433,7 +458,7 @@ var db=null,col=null,busy={};
 function setCloud(s){ui.cloud=s;var el=$(".cloud");if(el){el.dataset.s=s;el.lastChild.textContent=cloudText();}}
 function cloudText(){return {ok:"已保存到你的账号，换设备也能看",saving:"正在保存…",err:"暂时连不上，先存在这台设备上，稍后会再试",local:"账目存在这台设备上"}[ui.cloud];}
 function bodyFor(key){
-  if(key==="settings")return state.settings?{income:state.settings.income||0,target:state.settings.target,start:state.settings.start,subs:subs(),incs:incs(),assets:state.settings.assets||null}:{};
+  if(key==="settings")return state.settings?{income:state.settings.income||0,target:state.settings.target,start:state.settings.start,subs:subs(),incs:incs(),assets:state.settings.assets||null,hist:hist()}:{};
   var ym=key.slice(2);
   return {entries:state.entries.filter(function(e){return e.d.slice(0,7)===ym;})};
 }
@@ -466,7 +491,7 @@ function initCloud(){
           if(state.dirty.indexOf(key)>-1)return;               // 本机有没传上去的改动，以本机为准
           var data=snap.exists?snap.data():null;
           if(key==="settings"){
-            if(data&&typeof data.target==="number")state.settings={income:+data.income||0,target:+data.target,start:data.start||today(),subs:cleanSubs(data.subs),incs:cleanSubs(data.incs),assets:cleanAssets(data.assets)};
+            if(data&&typeof data.target==="number")state.settings={income:+data.income||0,target:+data.target,start:data.start||today(),subs:cleanSubs(data.subs),incs:cleanSubs(data.incs),assets:cleanAssets(data.assets),hist:cleanHist(data.hist)};
             else if(state.settings)state.dirty.push(key);
           }else{
             var ym=key.slice(2);
@@ -486,19 +511,20 @@ function initCloud(){
 }
 
 /* ================= 页面 ================= */
-var TABS=[{k:"home",n:"首页",i:"👑"},{k:"detail",n:"细则",i:"🧾"},{k:"calendar",n:"日历",i:"🗓️"},{k:"prefs",n:"设置",i:"⚙️"}];
+var TABS=[{k:"home",n:"首页",i:"👑"},{k:"detail",n:"细则",i:"🧾"},{k:"calendar",n:"日历",i:"🗓️"},{k:"assets",n:"资产",i:"💰"},{k:"prefs",n:"设置",i:"⚙️"}];
 
 function render(){
   var root=$("#root");
   if(!state.settings){root.innerHTML=viewWelcome();bindWelcome();return;}
   var scroll=$("main")?$("main").scrollTop:0,keep=$("main")&&$("main").dataset.v===ui.view;
-  var body={home:viewHome,detail:viewDetail,calendar:viewCalendar,prefs:viewPrefs}[ui.view]();
+  var body={home:viewHome,detail:viewDetail,calendar:viewCalendar,assets:viewAssets,prefs:viewPrefs}[ui.view]();
   root.innerHTML='<div class="app"><nav class="nav" aria-label="页面">'
     +'<div class="brand">'+king("idle")+'<b>大王账本</b></div>'
     +TABS.map(function(t){return '<button class="tab" data-go="'+t.k+'"'+(ui.view===t.k?' aria-current="page"':'')+'><span class="ico">'+t.i+'</span>'+t.n+'</button>';}).join("")
     +'<div class="cloud" data-s="'+ui.cloud+'"><i></i>'+esc(cloudText())+'</div>'
     +'</nav><main data-v="'+ui.view+'"><div class="page">'+body+'</div></main></div>';
   if(keep)$("main").scrollTop=scroll;
+  if(ui.view==="assets")drawChart();
 }
 
 function viewWelcome(){
@@ -576,7 +602,7 @@ function viewHome(){
         +'<div class="tile feature"><small>近 30 天净盈余</small><span class="num '+(s30.net>=0?"good":"bad")+'">'+signed(s30.net)+'</span><em>相比目标，按已记账的 '+s30.n+' 天算</em></div>'
         +(ta===null
           ?'<div class="tile"><small>总资产</small><span class="num">—</span><em>还没填，<a href="#prefs">去设置填一下</a></em></div>'
-          :'<div class="tile"><small>总资产</small><span class="num '+(ta>=0?"":"bad")+'">'+(ta<0?"−":"")+yuan(ta)+'</span><em>'+(ta>0?"按目标花能撑 "+months(ta/monthTarget)+" 个月":"见底了，大王慌了")+'</em></div>')
+          :'<a class="tile link" href="#assets"><small>总资产 ›</small><span class="num '+(ta>=0?"":"bad")+'">'+(ta<0?"−":"")+yuan(ta)+'</span><em>'+(ta>0?"按目标花能撑 "+months(ta/monthTarget)+" 个月":"见底了，大王慌了")+'</em></a>')
         +'<div class="tile"><small>本月已花</small><span class="num">'+yuan(sm.spent)+'</span><em>本月目标 '+yuan(monthTarget)+'</em></div>'
         +'<div class="tile"><small>本月结余</small><span class="num '+(bal>=0?"good":"bad")+'">'+signed(bal)+'</span><em>收入 '+yuan(mi)+' − 支出 '+yuan(sm.spent)+'</em></div>'
       +'</div>'
@@ -647,6 +673,76 @@ function viewCalendar(){
       +'<div style="margin-top:14px"><button class="btn plain" data-add="other" data-date="'+sel+'">给这天补记一笔</button></div>'
     +'</section></div>';
 }
+
+function viewAssets(){
+  var ta=totalAssets(),t=today(),mt=cents(state.settings.target);
+  var head='<div class="head"><h1>资产</h1></div>';
+  if(ta===null)return head+'<section class="card"><h2>还没填总资产</h2><p style="margin:0 0 14px">填一次你现在手上一共有多少钱，之后记的收入和花销会自动加减，这里就会画出资产变化曲线。</p><button class="btn" data-go="prefs">去设置填一下</button></section>';
+  var R=[["30","近 30 天"],["90","近 90 天"],["all","全部"]];
+  var pts=chartPoints(),chg=pts.length?ta-pts[0].v:0;
+  var mi=monthIncome(t.slice(0,7)),ms=summarize(rangeDays("month")).spent,bal=mi-ms;
+  var incList=state.entries.filter(function(e){return e.c==="income";}).sort(function(a,b){return a.d<b.d?1:a.d>b.d?-1:b.t-a.t;}).slice(0,12);
+  return head
+    +'<section class="card"><div class="ahero"><div><div class="left-label">现在总资产</div><div class="left-num num '+(ta>=0?"":"bad")+'">'+(ta<0?"−":"")+yuan(ta)+'</div>'
+      +'<div class="chg '+(chg>=0?"good":"bad")+'">'+(pts.length>1?(ui.arange==="all"?"从开始记到现在 ":R.filter(function(r){return r[0]===ui.arange;})[0][1]+" ")+signed(chg):"")+'</div></div>'
+      +'<div class="mute" style="font-weight:700">'+(ta>0?"按每月目标 "+yuan(mt)+" 花，能撑 "+months(ta/mt)+" 个月":"见底了，大王慌了")+'</div></div></section>'
+    +'<section class="card"><div class="cardhead"><h2>资产变化</h2><div class="seg" role="group" aria-label="时间范围">'
+      +R.map(function(r){return '<button data-arange="'+r[0]+'" aria-pressed="'+(ui.arange===r[0])+'">'+r[1]+'</button>';}).join("")+'</div></div>'
+      +'<div class="chartbox" id="achart"></div>'
+      +'<p class="note">每天结束时的总资产。收入让曲线往上走，花销让它往下走；在设置里校准过的话，从校准那天起按新数算。</p></section>'
+    +'<div class="grid2"><section class="card"><h2>本月</h2><div class="sumline">'
+      +'<div><small>收入</small><span class="num good">'+yuan(mi)+'</span></div>'
+      +'<div><small>支出</small><span class="num">'+yuan(ms)+'</span></div>'
+      +'<div><small>结余</small><span class="num '+(bal>=0?"good":"bad")+'">'+signed(bal)+'</span></div></div>'
+      +'<button class="btn income" data-income>💰 记收入</button></section>'
+    +'<section class="card"><h2>最近的收入</h2><div class="rows">'
+      +(incList.length?incList.map(function(e){return rowHTML(e,true);}).join(""):'<div class="empty">还没记过收入。</div>')
+    +'</div></section></div>';
+}
+function chartPoints(){
+  var t=today(),start=firstCalDay(),days=[];
+  if(!start)return [];
+  if(ui.arange==="all"){var d=start;while(d<=t){days.push(d);d=shift(d,1);}}
+  else days=lastDays(+ui.arange);
+  return assetSeries(days).filter(function(p){return p.v!==null;});
+}
+function niceStep(span){var raw=span/4,mag=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/mag;return (f<=1?1:f<=2?2:f<=5?5:10)*mag;}
+function shortDay(d){var x=toDate(d);return (x.getMonth()+1)+"/"+x.getDate();}
+function drawChart(){
+  var box=$("#achart");if(!box)return;
+  var pts=chartPoints();
+  if(pts.length<2){box.innerHTML='<div class="empty">才开始记，过两天这里就会有曲线了。</div>';return;}
+  var W=Math.max(260,box.clientWidth),H=Math.round(Math.min(280,Math.max(190,W*0.42))),L=62,Rp=14,T=14,B=28;
+  var vs=pts.map(function(p){return p.v;}),lo=Math.min.apply(null,vs),hi=Math.max.apply(null,vs);
+  if(lo===hi){lo-=10000;hi+=10000;}
+  var st=niceStep(hi-lo);lo=Math.floor(lo/st)*st;hi=Math.ceil(hi/st)*st;
+  var n=pts.length,X=function(i){return L+(W-L-Rp)*i/(n-1);},Y=function(v){return T+(H-T-B)*(1-(v-lo)/(hi-lo));};
+  var g="";
+  for(var v=lo;v<=hi+1;v+=st){g+='<line x1="'+L+'" x2="'+(W-Rp)+'" y1="'+Y(v)+'" y2="'+Y(v)+'" stroke="#E9E2CF" stroke-width="1"/>'
+    +'<text x="'+(L-8)+'" y="'+(Y(v)+4)+'" text-anchor="end" font-size="12" fill="#6B6285">'+compact(v).replace("+","")+'</text>';}
+  var xi=[0,Math.round((n-1)/2),n-1];
+  xi.forEach(function(i,k){g+='<text x="'+X(i)+'" y="'+(H-8)+'" text-anchor="'+(k===0?"start":k===2?"end":"middle")+'" font-size="12" fill="#6B6285">'+shortDay(pts[i].d)+'</text>';});
+  var path=pts.map(function(p,i){return (i?"L":"M")+X(i).toFixed(1)+" "+Y(p.v).toFixed(1);}).join("");
+  var last=pts[n-1];
+  box.innerHTML='<svg width="'+W+'" height="'+H+'" role="img" aria-label="资产变化曲线，从 '+labelDay(pts[0].d)+' 的 '+yuan(pts[0].v)+' 到 '+labelDay(last.d)+' 的 '+yuan(last.v)+'">'+g
+    +'<path d="'+path+'" fill="none" stroke="#6C4AE0" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>'
+    +'<circle cx="'+X(n-1)+'" cy="'+Y(last.v)+'" r="5" fill="#6C4AE0" stroke="#FFFDF6" stroke-width="2"/>'
+    +'<line id="ax" y1="'+T+'" y2="'+(H-B)+'" stroke="#231942" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>'
+    +'<circle id="ad" r="5" fill="#6C4AE0" stroke="#FFFDF6" stroke-width="2" visibility="hidden"/>'
+    +'<rect x="'+L+'" y="0" width="'+(W-L-Rp)+'" height="'+H+'" fill="transparent" id="ahit"/></svg><div class="tip" id="atip"></div>';
+  var hit=$("#ahit"),tip=$("#atip"),ax=$("#ax"),ad=$("#ad");
+  function show(ev){
+    var r=hit.getBoundingClientRect(),i=Math.round((ev.clientX-r.left)/r.width*(n-1));i=Math.max(0,Math.min(n-1,i));
+    var p=pts[i],dv=i?p.v-pts[i-1].v:0,x=X(i),y=Y(p.v);
+    ax.setAttribute("x1",x);ax.setAttribute("x2",x);ax.setAttribute("visibility","visible");
+    ad.setAttribute("cx",x);ad.setAttribute("cy",y);ad.setAttribute("visibility","visible");
+    tip.innerHTML=labelDay(p.d)+' '+(p.v<0?"−":"")+yuan(p.v)+(i?'<small>当天 '+signed(dv)+'</small>':'');
+    tip.style.display="block";tip.style.left=Math.max(70,Math.min(W-70,x))+"px";tip.style.top=Math.max(0,y-58)+"px";
+  }
+  function hide(){tip.style.display="none";ax.setAttribute("visibility","hidden");ad.setAttribute("visibility","hidden");}
+  hit.addEventListener("pointermove",show);hit.addEventListener("pointerdown",show);hit.addEventListener("pointerleave",hide);
+}
+var rsz=null;window.addEventListener("resize",function(){clearTimeout(rsz);rsz=setTimeout(function(){if(ui.view==="assets"&&state.settings)drawChart();},150);});
 
 function viewPrefs(){
   var s=state.settings,ta=totalAssets();
@@ -766,10 +862,10 @@ function pop(kind,mood,title,sub,confetti){
 
 /* ================= 事件 ================= */
 function go(v){ui.view=v;ui.confirmClear=false;try{if(location.hash!=="#"+v)location.hash=v;}catch(e){}render();var m=$("main");if(m)m.scrollTop=0;}
-function fromHash(){var h=(location.hash||"").slice(1);if(["home","detail","calendar","prefs"].indexOf(h)>-1&&h!==ui.view){ui.view=h;render();}}
+function fromHash(){var h=(location.hash||"").slice(1);if(["home","detail","calendar","assets","prefs"].indexOf(h)>-1&&h!==ui.view){ui.view=h;render();}}
 
 document.addEventListener("click",function(ev){
-  var t=ev.target.closest("[data-income],[data-stop],[data-go],[data-add],[data-edit],[data-range],[data-day],[data-act],[data-close],[data-cat],[data-plus],[data-date],[data-del]");
+  var t=ev.target.closest("[data-income],[data-stop],[data-go],[data-add],[data-edit],[data-range],[data-arange],[data-day],[data-act],[data-close],[data-cat],[data-plus],[data-date],[data-del]");
   if(ev.target.id==="scrim"){closeSheet();return;}
   if(!t)return;
   var d=t.dataset;
@@ -779,6 +875,7 @@ document.addEventListener("click",function(ev){
   else if(d.add)openSheet({cat:d.add,date:d.date});
   else if(d.edit){var e=state.entries.filter(function(x){return x.id===d.edit;})[0];if(e)openSheet({id:e.id,cat:e.c,date:e.d,amount:String(e.a),note:e.n});}
   else if(d.range){ui.range=d.range;render();}
+  else if(d.arange){ui.arange=d.arange;render();}
   else if(d.day){ui.calDay=d.day;render();}
   else if("close" in d)closeSheet();
   else if(d.cat&&ui.sheet){ui.sheet.cat=d.cat;$("#s-rec").hidden=!(d.cat==="sub"&&!ui.sheet.id);[].forEach.call(document.querySelectorAll("#s-cats .pill"),function(p){p.setAttribute("aria-pressed",p.dataset.cat===d.cat);});$("#s-amt").focus();}
@@ -802,7 +899,7 @@ document.addEventListener("click",function(ev){
     try{data=JSON.parse(raw);}catch(e){errEl.textContent="这段内容读不出来，确认是从“复制全部账目”完整复制的。";return;}
     if(!data||!data.settings||!(+data.settings.target>0)||!Array.isArray(data.entries)){errEl.textContent="这段内容里没有账本数据，确认是从“复制全部账目”完整复制的。";return;}
     var okList=data.entries.filter(function(q){return q&&q.id&&/^\d{4}-\d{2}-\d{2}$/.test(q.d)&&CAT[q.c]&&+q.a>0;}).map(function(q){var o={id:String(q.id),d:q.d,c:q.c,a:+q.a,n:String(q.n||"").slice(0,40),t:+q.t||0};if(q.r)o.r=String(q.r);return o;});
-    state.settings={income:+data.settings.income||0,target:+data.settings.target,start:/^\d{4}-\d{2}-\d{2}$/.test(data.settings.start||"")?data.settings.start:today(),subs:cleanSubs(data.settings.subs),incs:cleanSubs(data.settings.incs),assets:cleanAssets(data.settings.assets)};
+    state.settings={income:+data.settings.income||0,target:+data.settings.target,start:/^\d{4}-\d{2}-\d{2}$/.test(data.settings.start||"")?data.settings.start:today(),subs:cleanSubs(data.settings.subs),incs:cleanSubs(data.settings.incs),assets:cleanAssets(data.settings.assets),hist:cleanHist(data.settings.hist)};
     state.entries=okList;saveLocal();render();
     pop("praise","happy","搬好了","一共 "+okList.length+" 笔账",true);
   }
@@ -827,7 +924,7 @@ document.addEventListener("submit",function(ev){
     if(!(tar>0)){$("#p-err").textContent="目标花费要填一个大于 0 的数。";return;}
     if(v&&!isFinite(as)){$("#p-err").textContent="总资产要填一个数，不想填就空着。";return;}
     state.settings.target=tar;
-    if(isFinite(as)){var cur=totalAssets();if(cur===null||Math.round(as*100)!==cur)state.settings.assets={a:as,t:Date.now()};}
+    if(isFinite(as)){var cur=totalAssets();if(cur===null||Math.round(as*100)!==cur){if(state.settings.assets){hist().push(state.settings.assets);state.settings.hist=hist().slice(-60);}state.settings.assets={a:as,t:Date.now()};}}
     markDirty("settings");render();
     pop("praise","happy","保存了","每天能花 "+yuan(dailyCents(today())),false);
   }
@@ -841,7 +938,7 @@ setInterval(function(){var t=today();if(t!==seenDay){seenDay=t;autoSubs();if(!ui
 
 /* ================= 启动 ================= */
 loadLocal();
-var h0=(location.hash||"").slice(1);if(["home","detail","calendar","prefs"].indexOf(h0)>-1)ui.view=h0;
+var h0=(location.hash||"").slice(1);if(["home","detail","calendar","assets","prefs"].indexOf(h0)>-1)ui.view=h0;
 render();
 initCloud();
 if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){navigator.serviceWorker.register("sw.js").catch(function(){});}
